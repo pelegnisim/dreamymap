@@ -9,8 +9,8 @@
     body{background:#0d1117;display:flex;justify-content:center;align-items:center;height:100svh;overflow:hidden;font-family:'Segoe UI',Tahoma,Arial,sans-serif}
     #gameWrapper{position:relative;display:inline-block;max-width:100%;overflow:hidden}
     canvas{display:block;border:2px solid #30a0ff;border-radius:10px;box-shadow:0 0 40px rgba(48,160,255,.3);cursor:crosshair;max-width:100vw;max-height:100svh;width:auto;height:auto;touch-action:none}
-    #modalClose{position:absolute;top:8px;left:10px;background:none;border:none;color:#aaa;font-size:22px;cursor:pointer;line-height:1;padding:4px 8px;z-index:10}
-    #modalClose:hover{color:#fff}
+    #modalClose{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#ccc;font-size:18px;cursor:pointer;width:34px;height:34px;line-height:34px;border-radius:50%;text-align:center;z-index:999;touch-action:manipulation;padding:0}
+    #modalClose:hover{background:rgba(255,255,255,.28);color:#fff}
 
     #modal{
       display:none;position:absolute;
@@ -87,6 +87,8 @@
       transition:transform .15s;margin-top:6px
     }
     #victoryReplay:hover{transform:scale(1.05)}
+    #victoryShare{padding:10px 28px;background:transparent;border:2px solid #30a0ff;border-radius:12px;color:#30a0ff;font-size:15px;cursor:pointer;transition:all .15s;margin-top:8px}
+    #victoryShare:hover{background:rgba(48,160,255,.15);transform:scale(1.03)}
   </style>
 </head>
 <body>
@@ -100,6 +102,7 @@
     <div id="victoryAttrs" style="font-size:15px;color:#fff;margin-bottom:6px"></div>
     <div id="victoryHigh" style="font-size:14px;color:#ffd700;margin-bottom:22px"></div>
     <button id="victoryReplay">שחקו שוב 🔄</button>
+    <button id="victoryShare">שתפו ניקוד 📤</button>
   </div>
   <div id="modal">
     <button id="modalClose">✕</button>
@@ -139,6 +142,7 @@
 const W = 800, H = 620, MAP_W = 540;
 const PANEL_X = 545, PANEL_W = 255;
 const MX = 155, MY = 30;
+const PORTRAIT_PANEL_H = 200;
 
 const caravanImg = new Image();
 caravanImg.src = 'Dreamy_Sticker-removebg-preview.png';
@@ -239,7 +243,7 @@ const CITIES = [
         {q:'מה הטמפרטורה של מי חמי טבריה?', opts:['40°C','80°C','60°C'], a:2,
          exp:'60 מעלות! המים מגיעים ממעמקי האדמה דרך סדקים גיאותרמיים. ה"חמים" ידועים כ-3,500 שנה — גם הרומאים בנו שם אמבטיות! היום יש ספא מודרני, אבל המים עדיין אותם מים קדמוניים.'},
         {q:'מי הקים את העיר טבריה?', opts:['הורדוס הגדול','הורדוס אנטיפס','המכבים'], a:1,
-         exp:'הורדוס אנטיפס בנה את טבריה ב-20 לספירה לכבוד הקיסר הרומי טיבריוס — ולכן שמה "טבריה"! הוא בנה אותה על בית קברות עתיק, לכן יהודים מדוקדקים נמנעו לגור שם בהתחלה. בהדרגה היא הפכה לעיר יהודית חשובה.'},
+         exp:'הורדוס אנטיפס (לא אביו הורדוס הגדול!) בנה את טבריה ב-20 לספירה לכבוד הקיסר הרומי טיבריוס. הורדוס הגדול היה מלך יהודה כולה ובנה את בית המקדש ומצדה, ואילו בנו אנטיפס היה שליט זוטר (טטרארך) של הגליל בלבד — מוכר מהברית החדשה. העיר נבנתה על בית קברות עתיק, לכן יהודים מדוקדקים נמנעו לגור שם בהתחלה.'},
       ]},
       { name:'כנסיית הרבייה', pts:15, trivia:[
         {q:'כנסיית הרבייה נמצאת בקרבת איזו עיר?', opts:['טבריה','כפר נחום','ים הכינרת'], a:1,
@@ -865,6 +869,7 @@ let particles = [];
 let selectingStart = true;
 let mapZoom = 1, mapPanX = 0, mapPanY = 0;
 let fuel = 100;
+let correctStreak = 0;
 const MAX_FUEL = 100;
 const FUEL_STATIONS = new Set(['חיפה','תל אביב','באר שבע','אילת']);
 
@@ -1031,6 +1036,12 @@ function showExplanation(correct, timeout, earned) {
 function showResult(correct, timeout, earned) {
   activeAttr.done = true;
   if (correct) {
+    correctStreak++;
+    let streakBonus = 0;
+    if (correctStreak >= 3) {
+      streakBonus = 10;
+      earned += streakBonus;
+    }
     score += earned;
     if (score > highScore) {
       highScore = score;
@@ -1038,13 +1049,18 @@ function showResult(correct, timeout, earned) {
     }
     visitLog.unshift(`${activeCity.name} — ${activeAttr.name} +${earned}`);
   } else {
+    correctStreak = 0;
     visitLog.unshift(`${activeCity.name} — ${activeAttr.name} +0`);
   }
   if (visitLog.length > 6) visitLog.pop();
+  saveGame();
 
+  const streakTxt = correctStreak >= 3 ? ` 🔥×${correctStreak} +10 בונוס!` : '';
   showScreen('result');
   document.getElementById('resultIcon').textContent = correct ? '🎉' : (timeout ? '⏱️' : '❌');
-  document.getElementById('resultText').textContent  = correct ? 'תשובה נכונה!' : (timeout ? 'פג הזמן!' : 'תשובה שגויה...');
+  document.getElementById('resultText').textContent  = correct
+    ? `תשובה נכונה!${streakTxt}`
+    : (timeout ? 'פג הזמן!' : 'תשובה שגויה...');
   document.getElementById('resultPts').textContent   = correct
     ? `+${earned} נקודות (בונוס מהירות כלול! 🚀)`
     : `0 נקודות — שווה לדעת לפעם הבאה 💡`;
@@ -1109,8 +1125,66 @@ function resetGame() {
   document.getElementById('victory').style.display = 'none';
 }
 
-document.getElementById('victoryReplay').onclick = resetGame;
-document.getElementById('modalClose').onclick = closeModal;
+function saveGame() {
+  try {
+    localStorage.setItem('dreamySave', JSON.stringify({
+      score, fuel, correctStreak,
+      caravanX: caravan.x, caravanY: caravan.y,
+      selectingStart,
+      visitLog: [...visitLog],
+      cities: CITIES.map(c => ({
+        snoozed: c.snoozed || false,
+        attractions: c.attractions.map(a => a.done || false)
+      }))
+    }));
+  } catch(e) {}
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem('dreamySave');
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    score = s.score || 0;
+    fuel = s.fuel ?? 100;
+    correctStreak = s.correctStreak || 0;
+    caravan.x = s.caravanX ?? -200;
+    caravan.y = s.caravanY ?? -200;
+    selectingStart = s.selectingStart ?? true;
+    visitLog.length = 0;
+    (s.visitLog || []).forEach(v => visitLog.push(v));
+    (s.cities || []).forEach((cs, i) => {
+      if (!CITIES[i]) return;
+      CITIES[i].snoozed = cs.snoozed;
+      cs.attractions.forEach((done, j) => {
+        if (CITIES[i].attractions[j]) CITIES[i].attractions[j].done = done;
+      });
+    });
+    return true;
+  } catch(e) { return false; }
+}
+
+document.getElementById('victoryReplay').onclick = () => {
+  localStorage.removeItem('dreamySave');
+  correctStreak = 0;
+  resetGame();
+};
+
+// Share score
+function shareScore() {
+  const txt = `שיחקתי קרוון בישראל וקיבלתי ${score} נקודות! 🚐🇮🇱`;
+  if (navigator.share) {
+    navigator.share({ title: 'קרוון בישראל 🚐', text: txt }).catch(() => {});
+  } else if (navigator.clipboard) {
+    navigator.clipboard.writeText(txt).then(() => alert('הניקוד הועתק ✓')).catch(() => {});
+  }
+}
+document.getElementById('victoryShare').onclick = shareScore;
+
+// Close button — both click and touchend for reliable mobile
+const _mc = document.getElementById('modalClose');
+_mc.addEventListener('click', closeModal);
+_mc.addEventListener('touchend', e => { e.preventDefault(); closeModal(); });
 
 function spawnConfetti() {
   const cx = MAP_W / 2, cy = H / 2;
@@ -1128,10 +1202,32 @@ function spawnConfetti() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CANVAS
+// CANVAS + PORTRAIT MODE
 // ═══════════════════════════════════════════════════════════════
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+let portraitMode = false;
+
+function isPortraitMobile() {
+  return window.innerWidth < 650 && window.innerWidth < window.innerHeight;
+}
+
+function resizeCanvas() {
+  portraitMode = isPortraitMobile();
+  const modal = document.getElementById('modal');
+  if (portraitMode) {
+    canvas.width  = MAP_W;
+    canvas.height = H + PORTRAIT_PANEL_H;
+    modal.style.left = '50%';
+    modal.style.top  = (H / 2) + 'px';
+  } else {
+    canvas.width  = W;
+    canvas.height = H;
+    modal.style.left = '33.75%';
+    modal.style.top  = '50%';
+  }
+}
+window.addEventListener('resize', resizeCanvas);
 
 // Click-to-move
 function handleCanvasClick(tx, ty) {
@@ -1154,7 +1250,7 @@ function handleCanvasClick(tx, ty) {
     }
     return;
   }
-  if (mapX >= 0 && mapX < MAP_W) clickTarget = { x: mapX, y: mapY };
+  if (mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < H) clickTarget = { x: mapX, y: mapY };
 }
 canvas.addEventListener('click', e => {
   const rect = canvas.getBoundingClientRect();
@@ -1464,11 +1560,15 @@ function drawPanel() {
     ctx.fillText(t, PANEL_X + PANEL_W - 12, 262 + i * 17);
   });
 
+  const citiesLeft = CITIES.filter(c => c.attractions.some(a => !a.done)).length;
+  ctx.font = '10px Arial'; ctx.fillStyle = '#88aacc'; ctx.textAlign = 'center';
+  ctx.fillText(`🏙️ ערים שנותרו: ${citiesLeft}`, cx, 348);
+
   if (totalAttrDone === totalAttr) {
     ctx.font = 'bold 13px Arial'; ctx.fillStyle = '#ffd700'; ctx.textAlign = 'center';
-    ctx.fillText('🎉 סיימת את כל הארץ!', cx, 365);
+    ctx.fillText('🎉 סיימת את כל הארץ!', cx, 370);
     ctx.font = '11px Arial'; ctx.fillStyle = '#aaa';
-    ctx.fillText(`סה"כ: ${score} נקודות`, cx, 381);
+    ctx.fillText(`סה"כ: ${score} נקודות`, cx, 386);
   }
 
   ctx.strokeStyle = '#1a2a40';
@@ -1477,6 +1577,79 @@ function drawPanel() {
   ctx.font = '10px Arial'; ctx.fillStyle = '#334455'; ctx.textAlign = 'center';
   ctx.fillText('⌨️ חצים / WASD | 🖱️ לחצו על המפה', cx, H-38);
   ctx.fillText('📍 גשו לערים לגלות אטרקציות', cx, H-20);
+}
+
+// ── Portrait Panel ────────────────────────────────────────────
+function drawPanelPortrait() {
+  const py = H, pw = MAP_W, ph = PORTRAIT_PANEL_H;
+  const col = pw / 3; // ~180px per column
+
+  // Background
+  ctx.fillStyle = '#080e1e';
+  ctx.fillRect(0, py, pw, ph);
+  ctx.strokeStyle = '#30a0ff33'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(pw, py); ctx.stroke();
+
+  // Vertical dividers
+  [col, col*2].forEach(x => {
+    ctx.beginPath(); ctx.moveTo(x, py+8); ctx.lineTo(x, py+ph-8); ctx.stroke();
+  });
+
+  const totalAttrDone = CITIES.reduce((s, c) => s + c.attractions.filter(a => a.done).length, 0);
+  const totalAttr = CITIES.reduce((s, c) => s + c.attractions.length, 0);
+
+  // === LEFT: Title + Score ===
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 11px Arial'; ctx.fillStyle = '#ffd700';
+  ctx.fillText('🚐 קרוון בישראל', col*0.5, py+20);
+  ctx.font = 'bold 40px Arial'; ctx.fillStyle = '#30a0ff';
+  ctx.fillText(score, col*0.5, py+70);
+  ctx.font = '11px Arial'; ctx.fillStyle = '#6699bb';
+  ctx.fillText('נקודות', col*0.5, py+88);
+  if (highScore > 0) {
+    ctx.font = '10px Arial'; ctx.fillStyle = '#ffd70099';
+    ctx.fillText(`שיא: ${highScore}`, col*0.5, py+104);
+  }
+
+  // === MIDDLE: Fuel + Progress ===
+  const mx = col;
+  const fuelLbl = fuel <= 0 ? '⛽ ריק!' : fuel < 20 ? '⚠️ נמוך!' : `⛽ ${Math.ceil(fuel)}%`;
+  ctx.font = 'bold 10px Arial';
+  ctx.fillStyle = fuel < 20 ? '#f44336' : '#ffa000';
+  ctx.textAlign = 'center';
+  ctx.fillText(fuelLbl, mx + col/2, py+22);
+  const fgw = col-24, fgx = mx+12;
+  ctx.fillStyle = '#111827'; ctx.fillRect(fgx, py+28, fgw, 8);
+  const fc = fuel < 20 ? '#f44336' : fuel < 40 ? '#ffc107' : '#4caf50';
+  if (fuel > 0) { ctx.fillStyle = fc; ctx.fillRect(fgx, py+28, fgw*fuel/MAX_FUEL, 8); }
+  ctx.strokeStyle = '#ffa00044'; ctx.strokeRect(fgx, py+28, fgw, 8);
+
+  ctx.font = 'bold 18px Arial'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+  ctx.fillText(`${totalAttrDone} / ${totalAttr}`, mx+col/2, py+62);
+  ctx.font = '10px Arial'; ctx.fillStyle = '#6699bb';
+  ctx.fillText('אטרקציות', mx+col/2, py+76);
+  const pgw = col-24, pgx = mx+12;
+  ctx.fillStyle = '#111827'; ctx.fillRect(pgx, py+82, pgw, 7);
+  if (totalAttrDone > 0) { ctx.fillStyle = '#30a0ff'; ctx.fillRect(pgx, py+82, pgw*totalAttrDone/totalAttr, 7); }
+  ctx.strokeStyle = '#30a0ff44'; ctx.strokeRect(pgx, py+82, pgw, 7);
+
+  const citiesLeftP = CITIES.filter(c => c.attractions.some(a => !a.done)).length;
+  ctx.font = '9px Arial'; ctx.fillStyle = '#88aacc'; ctx.textAlign = 'center';
+  ctx.fillText(`🏙️ ערים: ${citiesLeftP}`, mx+col/2, py+100);
+  ctx.font = '9px Arial'; ctx.fillStyle = '#334455'; ctx.textAlign = 'center';
+  ctx.fillText('👆 גע | 🤏 זום', mx+col/2, py+ph-10);
+
+  // === RIGHT: Recent visits ===
+  const rx = col*2;
+  ctx.font = 'bold 10px Arial'; ctx.fillStyle = '#ffd700'; ctx.textAlign = 'right';
+  ctx.fillText('ביקורים:', col*3-12, py+20);
+  visitLog.slice(0, 6).forEach((entry, i) => {
+    ctx.font = i === 0 ? 'bold 10px Arial' : '9px Arial';
+    ctx.fillStyle = i === 0 ? '#ddeeff' : '#3d5577';
+    ctx.textAlign = 'right';
+    const t = entry.length > 22 ? entry.slice(0,21)+'…' : entry;
+    ctx.fillText(t, col*3-12, py+36+i*16);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1551,9 +1724,9 @@ function update() {
 // ═══════════════════════════════════════════════════════════════
 function loop() {
   if (!selectingStart) update();
-  ctx.clearRect(0, 0, W, H);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // MAP area — apply zoom/pan transform
+  // MAP area — apply zoom/pan transform, clipped to map region
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, MAP_W, H); ctx.clip();
   ctx.translate(mapPanX, mapPanY);
@@ -1572,12 +1745,22 @@ function loop() {
   ctx.restore();
 
   // Panel — no zoom
-  drawPanel();
+  if (portraitMode) drawPanelPortrait(); else drawPanel();
 
-  // Start-city selection overlay
+  // Fuel warning: red pulsing border
+  if (fuel < 20 && fuel > 0) {
+    const alpha = 0.25 + 0.55 * Math.abs(Math.sin(Date.now() / 350));
+    ctx.save();
+    ctx.strokeStyle = `rgba(244,67,54,${alpha})`;
+    ctx.lineWidth = 9;
+    ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+    ctx.restore();
+  }
+
+  // Start-city selection overlay (map area only)
   if (selectingStart) {
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillStyle = 'rgba(0,0,0,0.50)';
     ctx.fillRect(0, 0, MAP_W, H);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 22px Arial';
@@ -1595,6 +1778,8 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
+loadGame(); // Restore previous session if any
+resizeCanvas(); // Set correct canvas size before first frame
 if (caravanImg.complete && caravanImg.naturalWidth > 0) loop();
 else { caravanImg.onload = loop; caravanImg.onerror = loop; }
 </script>
