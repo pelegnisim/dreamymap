@@ -762,6 +762,7 @@ CITIES.forEach(c => {
   c.cx = MX + c.mx;
   c.cy = MY + c.my;
   c.snoozed = false;
+  c.lastClosed = 0;
   c.attractions.forEach(a => { a.done = false; });
 });
 
@@ -800,13 +801,18 @@ function initAudio() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
     return;
   }
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  // iOS requires a silent sound to unlock AudioContext within the gesture
-  const buf = audioCtx.createBuffer(1, 1, 22050);
-  const src = audioCtx.createBufferSource();
-  src.buffer = buf;
-  src.connect(audioCtx.destination);
-  src.start(0);
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+  catch(e) { return; }
+  // iOS: must resume() synchronously within gesture handler, THEN play sound
+  if (audioCtx.resume) audioCtx.resume();
+  try {
+    // Play near-silent tone to confirm unlock (works better than empty buffer on iOS)
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.0001;
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(0); osc.stop(audioCtx.currentTime + 0.001);
+  } catch(e) {}
 }
 function playNote(f, t, d) {
   if (!audioCtx || f === 0) return;
@@ -860,7 +866,10 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => { keys[e.key] = false; });
 document.addEventListener('click', () => initAudio());
-document.addEventListener('touchstart', () => initAudio(), { passive: true });
+document.addEventListener('touchstart', () => {
+  if (!audioCtx) { initAudio(); return; }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}, { passive: true });
 
 // ═══════════════════════════════════════════════════════════════
 // GAME STATE
@@ -1101,7 +1110,7 @@ function closeModal() {
   if (triviaTimer) { clearInterval(triviaTimer); triviaTimer = null; }
   modal.style.display = 'none';
   modalOpen = false;
-  if (activeCity) activeCity.snoozed = true;
+  if (activeCity) activeCity.lastClosed = Date.now();
   activeCity = null; activeAttr = null; activeQ = null;
   clickTarget = null;
   canvas.style.cursor = 'crosshair';
@@ -1126,6 +1135,7 @@ function resetGame() {
   particles = [];
   CITIES.forEach(c => {
     c.snoozed = false;
+    c.lastClosed = 0;
     c.attractions.forEach(a => { a.done = false; });
   });
   caravan.x = -200;
@@ -1411,7 +1421,15 @@ function drawCities() {
     const anyDone = doneCount > 0;
 
     // Pulsing ring
-    if (!allDone) {
+    if (allDone) {
+      // Gold glow for completed cities
+      const pulse = 0.5 + 0.5 * Math.sin(now / 1000 + cx * 0.05);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 13 + pulse * 5, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,215,0,${0.3 + pulse * 0.4})`;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    } else {
       const pulse = 0.5 + 0.5 * Math.sin(now / 600 + cx * 0.05);
       ctx.beginPath();
       ctx.arc(cx, cy, 14 + pulse * 4, 0, Math.PI * 2);
@@ -1422,10 +1440,10 @@ function drawCities() {
 
     ctx.beginPath();
     ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-    ctx.fillStyle = allDone ? 'rgba(255,215,0,.3)' : (anyDone ? color + '66' : color + '44');
+    ctx.fillStyle = allDone ? 'rgba(255,215,0,.35)' : (anyDone ? color + '66' : color + '44');
     ctx.fill();
     ctx.strokeStyle = allDone ? '#ffd700' : color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = allDone ? 2.5 : 2;
     ctx.stroke();
 
     ctx.font = '13px Arial';
@@ -1434,10 +1452,10 @@ function drawCities() {
     ctx.fillText(c.emoji, cx, cy);
     ctx.textBaseline = 'alphabetic';
 
-    // Star status
-    ctx.font = '11px Arial';
+    // Status badge
+    ctx.font = allDone ? '14px Arial' : '11px Arial';
     ctx.textAlign = 'center';
-    if (allDone) ctx.fillText('⭐', cx, cy - 15);
+    if (allDone) ctx.fillText('✅', cx, cy - 17);
     else if (anyDone) ctx.fillText('☆', cx, cy - 14);
 
     // Remaining badge
@@ -1747,10 +1765,11 @@ function update() {
     if (c.snoozed && Math.hypot(caravan.x - c.cx, caravan.y - c.cy) > 70) c.snoozed = false;
   });
 
-  // Proximity check — only during keyboard/free movement (not while traveling to a city)
-  if (!travelingTo) {
+  // Proximity check — only during keyboard movement (not during any click navigation)
+  if (!travelingTo && !clickTarget) {
     for (const city of CITIES) {
       if (city.snoozed) continue;
+      if (city.lastClosed && Date.now() - city.lastClosed < 3000) continue;
       const anyLeft = city.attractions.some(a => !a.done);
       if (!anyLeft) continue;
       if (Math.hypot(caravan.x - city.cx, caravan.y - city.cy) < 28) {
@@ -1799,6 +1818,66 @@ function loop() {
     ctx.restore();
   }
 
+  // Fuel empty: arrow pointing to nearest fuel station
+  if (fuel <= 0) {
+    let nearestStation = null, nearestDist = Infinity;
+    CITIES.forEach(c => {
+      if (FUEL_STATIONS.has(c.name)) {
+        const d = Math.hypot(caravan.x - c.cx, caravan.y - c.cy);
+        if (d < nearestDist) { nearestDist = d; nearestStation = c; }
+      }
+    });
+    if (nearestStation) {
+      ctx.save();
+      const ang = Math.atan2(nearestStation.cy - caravan.y, nearestStation.cx - caravan.x);
+      const pulse = 0.7 + 0.3 * Math.abs(Math.sin(Date.now() / 400));
+      // Arrow base at caravan
+      const ax = caravan.x, ay = caravan.y;
+      const arrowLen = 36 * pulse;
+      const tx2 = ax + Math.cos(ang) * arrowLen, ty2 = ay + Math.sin(ang) * arrowLen;
+      ctx.strokeStyle = '#ff5722';
+      ctx.fillStyle = '#ff5722';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(tx2, ty2); ctx.stroke();
+      // Arrowhead
+      ctx.translate(tx2, ty2);
+      ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(-10, -5); ctx.lineTo(-10, 5); ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      // Label
+      ctx.save();
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'center';
+      const lbl = `⛽ ${nearestStation.name}`;
+      const lw = ctx.measureText(lbl).width;
+      const lx = Math.min(MAP_W - lw / 2 - 8, Math.max(lw / 2 + 8, ax + Math.cos(ang) * 55));
+      const ly = Math.min(H - 20, Math.max(20, ay + Math.sin(ang) * 55));
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.beginPath(); ctx.roundRect(lx - lw / 2 - 6, ly - 14, lw + 12, 20, 5); ctx.fill();
+      ctx.fillStyle = '#ff9800';
+      ctx.fillText(lbl, lx, ly);
+      ctx.restore();
+    }
+  }
+
+  // Travel indicator
+  if (travelingTo) {
+    ctx.save();
+    ctx.font = 'bold 15px Arial';
+    ctx.textAlign = 'center';
+    const label = `✈️ נוסעים ל: ${travelingTo.emoji || ''} ${travelingTo.name}`;
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.roundRect(MAP_W / 2 - tw / 2 - 12, 10, tw + 24, 32, 8);
+    ctx.fill();
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText(label, MAP_W / 2, 31);
+    ctx.restore();
+  }
+
   // Start-city selection overlay (map area only)
   if (selectingStart) {
     ctx.save();
@@ -1807,10 +1886,10 @@ function loop() {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 22px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('🏠 בחרי עיר להתחלה', MAP_W / 2, H / 2 - 10);
+    ctx.fillText('🏠 בחרו עיר להתחלה', MAP_W / 2, H / 2 - 10);
     ctx.font = '14px Arial';
     ctx.fillStyle = '#aad4ff';
-    ctx.fillText('לחצי על כל עיר במפה', MAP_W / 2, H / 2 + 20);
+    ctx.fillText('לחצו על כל עיר במפה', MAP_W / 2, H / 2 + 20);
     ctx.restore();
   }
 
