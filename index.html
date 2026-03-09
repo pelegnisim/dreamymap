@@ -1099,6 +1099,7 @@ function closeModal() {
   if (triviaTimer) { clearInterval(triviaTimer); triviaTimer = null; }
   modal.style.display = 'none';
   modalOpen = false;
+  if (activeCity) activeCity.snoozed = true;
   activeCity = null; activeAttr = null; activeQ = null;
   clickTarget = null;
   canvas.style.cursor = 'crosshair';
@@ -1336,10 +1337,10 @@ canvas.addEventListener('wheel', e => {
 function mp(x, y) { return [MX + x, MY + y]; }
 
 const TRAIL_POINTS = [
-  [130,48],[110,52],[95,68],[115,112],
-  [100,148],[82,138],[45,115],[13,153],
-  [6,198],[8,243],[10,250],[15,262],
-  [7,308],[65,398],[78,455],[128,498],
+  [143,22],[118,45],[100,68],[85,95],
+  [80,118],[82,148],[85,175],[88,210],
+  [90,245],[95,275],[98,310],[100,350],
+  [103,390],[108,430],[118,462],[128,492],
 ];
 
 function drawTrail() {
@@ -1357,7 +1358,7 @@ function drawTrail() {
   ctx.font='bold 8px Arial';
   ctx.fillStyle='#ff6600bb';
   ctx.textAlign='left';
-  ctx.fillText('🥾 שביל ישראל', MX+3, MY+510);
+  ctx.fillText('🥾 שביל ישראל', MX+55, MY+480);
   ctx.restore();
 }
 
