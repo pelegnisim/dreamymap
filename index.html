@@ -830,13 +830,12 @@ function stopMelody() {
 }
 function playMelody(key) {
   if (!audioCtx) return;
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume().then(() => playMelody(key));
-    return;
-  }
+  // Always resume if suspended — on iOS, notes scheduled at a future time will
+  // play once context transitions to running (don't return early or use .then())
+  if (audioCtx.state === 'suspended') audioCtx.resume();
   const m = MELODIES[key]; if (!m) return;
   const bd = 60 / m.bpm;
-  let t = audioCtx.currentTime + 0.05;
+  let t = audioCtx.currentTime + 0.1;
   m.notes.forEach(([f, d]) => { playNote(f, t, d * bd * 0.88); t += d * bd; });
   const total = m.notes.reduce((s, [,d]) => s + d * bd, 0);
   melodyTimeout = setTimeout(() => playMelody(key), (total - 0.05) * 1000);
