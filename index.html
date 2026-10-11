@@ -102,6 +102,19 @@
     }
     #victoryReplay:hover{transform:scale(1.05)}
     #victoryShare{padding:10px 28px;background:transparent;border:2px solid #30a0ff;border-radius:12px;color:#30a0ff;font-size:15px;cursor:pointer;transition:all .15s;margin-top:8px}
+    #shareBtn{display:none;position:absolute;z-index:50;padding:9px 6px;border:none;border-radius:10px;cursor:pointer;
+      background:linear-gradient(135deg,#ff6a3d,#ffb02e);color:#fff;font-weight:bold;font-size:13px;
+      box-shadow:0 4px 14px rgba(255,120,40,.35);font-family:inherit;direction:rtl}
+    #shareBtn:hover{transform:scale(1.03)}
+    #shareOverlay{display:none;position:fixed;inset:0;z-index:500;background:rgba(3,7,18,.92);
+      flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px;direction:rtl}
+    #shareOverlay img{max-height:calc(100svh - 170px);max-width:92vw;border-radius:14px;box-shadow:0 0 40px rgba(48,160,255,.35)}
+    #shareOverlay .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+    #shareOverlay button{padding:12px 22px;border-radius:12px;font-size:15px;font-weight:bold;cursor:pointer;font-family:inherit;border:none}
+    #shareGo{background:linear-gradient(135deg,#ff6a3d,#ffb02e);color:#fff}
+    #shareSave{background:#1a5496;color:#fff}
+    #shareClose{background:transparent;color:#8899bb;border:1px solid #334 !important}
+    #shareHint{color:#8899bb;font-size:12px;text-align:center;max-width:340px}
     #victoryShare:hover{background:rgba(48,160,255,.15);transform:scale(1.03)}
   </style>
 </head>
@@ -118,6 +131,7 @@
     <button id="victoryReplay">שחקו שוב 🔄</button>
     <button id="victoryShare">שתפו ניקוד 📤</button>
   </div>
+  <button id="shareBtn">📸 שתפו את המסלול</button>
   <div id="modal">
     <div id="screenCity">
       <div id="cityPhoto"><img id="cityImg" alt=""><a id="cityImgCredit" target="_blank" rel="noopener">צילום: ויקיפדיה</a></div>
@@ -150,6 +164,15 @@
   </div>
 </div>
 
+<div id="shareOverlay">
+  <img id="shareImg" alt="כרטיס המסלול שלך">
+  <div class="row">
+    <button id="shareGo">📤 שיתוף לסטורי</button>
+    <button id="shareSave">⬇️ שמירת התמונה</button>
+    <button id="shareClose">סגירה</button>
+  </div>
+  <div id="shareHint">בטלפון: "שיתוף לסטורי" ← אינסטגרם ← סטורי. אל תשכחו לתייג <bdi dir="ltr">@pelegnisim</bdi> 💛</div>
+</div>
 <script>
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -1095,6 +1118,8 @@ const caravan = {
 let score = 0;
 let highScore = parseInt(localStorage.getItem('dreamyHighScore') || '0');
 const visitLog = [];
+let routeLog = [];           // cities in the order they were first visited (for the share card)
+let answeredTotal = 0, correctTotal = 0;   // correctTotal = null for old saves that didn't track it
 let clickTarget = null;  // {x, y} for click-to-move
 let particles = [];
 let selectingStart = true;
@@ -1115,6 +1140,45 @@ function shuffleQuestion(q) {
     [items[i], items[j]] = [items[j], items[i]];
   }
   return { q: q.q, opts: items.map(s => s.opt), a: items.findIndex(s => s.correct), exp: q.exp };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TRIVIA — DON'T REPEAT QUESTIONS (remembered across games on this device)
+// ═══════════════════════════════════════════════════════════════
+let activeQKey = null;
+function qKey(q) {
+  let h = 5381;
+  for (let i = 0; i < q.q.length; i++) h = ((h * 33) ^ q.q.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+function loadSeen() {
+  try { return new Set(JSON.parse(localStorage.getItem('dreamySeenQ') || '[]')); }
+  catch (e) { return new Set(); }
+}
+function saveSeen(set) {
+  try { localStorage.setItem('dreamySeenQ', JSON.stringify([...set])); } catch (e) {}
+}
+function pickUnseenQuestion(attr) {
+  const seen = loadSeen();
+  let pool = attr.trivia.filter(q => !seen.has(qKey(q)));
+  if (pool.length === 0) {
+    // Every question of this attraction was already answered — start its cycle over,
+    // but don't open the new cycle with the question that was asked last time
+    attr.trivia.forEach(q => seen.delete(qKey(q)));
+    saveSeen(seen);
+    const last = localStorage.getItem('dreamyLastQ_' + attr.name);
+    pool = attr.trivia.length > 1 ? attr.trivia.filter(q => qKey(q) !== last) : attr.trivia;
+  }
+  const q = pool[Math.floor(Math.random() * pool.length)];
+  activeQKey = qKey(q);
+  return q;
+}
+function markQuestionSeen() {
+  if (!activeQKey) return;
+  const seen = loadSeen();
+  seen.add(activeQKey);
+  saveSeen(seen);
+  try { if (activeAttr) localStorage.setItem('dreamyLastQ_' + activeAttr.name, activeQKey); } catch (e) {}
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1250,7 +1314,7 @@ function continueInCity() {
 function startTrivia(attr) {
   activeAttr = attr;
   triviaAnswered = false;
-  activeQ = shuffleQuestion(attr.trivia[Math.floor(Math.random() * attr.trivia.length)]);
+  activeQ = shuffleQuestion(pickUnseenQuestion(attr));
 
   showScreen('trivia');
   document.getElementById('triviaAttrName').textContent = `🎯 ${attr.name}`;
@@ -1295,6 +1359,7 @@ function answerTrivia(chosenIdx, chosenBtn) {
 
   const correct = chosenIdx === activeQ.a;
   const timeout = chosenIdx === -1;
+  markQuestionSeen();
 
   if (!timeout && chosenBtn) chosenBtn.classList.add(correct ? 'correct' : 'wrong');
   if (!correct) {
@@ -1314,6 +1379,7 @@ function answerTrivia(chosenIdx, chosenBtn) {
 }
 
 function showExplanation(correct, timeout, earned) {
+  if (!activeQ) return;
   showScreen('explanation');
   document.getElementById('expIcon').textContent  = correct ? '💡' : '📖';
   document.getElementById('expTitle').textContent = correct ? 'נכון! הנה עוד על הנושא:' : 'הנה התשובה הנכונה:';
@@ -1323,6 +1389,9 @@ function showExplanation(correct, timeout, earned) {
 
 function showResult(correct, timeout, earned) {
   activeAttr.done = true;
+  answeredTotal++;
+  if (correct && correctTotal !== null) correctTotal++;
+  if (!routeLog.includes(activeCity.name)) routeLog.push(activeCity.name);
   if (correct) {
     correctStreak++;
     let streakBonus = 0;
@@ -1400,6 +1469,8 @@ function resetGame() {
   score = 0;
   fuel = 100;
   visitLog.length = 0;
+  routeLog = [];
+  answeredTotal = 0; correctTotal = 0;
   particles = [];
   CITIES.forEach(c => {
     c.snoozed = false;
@@ -1423,6 +1494,8 @@ function saveGame() {
       caravanX: caravan.x, caravanY: caravan.y,
       selectingStart,
       visitLog: [...visitLog],
+      routeLog: [...routeLog],
+      answeredTotal, correctTotal,
       cities: CITIES.map(c => ({
         snoozed: c.snoozed || false,
         attractions: c.attractions.map(a => a.done || false)
@@ -1451,6 +1524,11 @@ function loadGame() {
         if (CITIES[i].attractions[j]) CITIES[i].attractions[j].done = done;
       });
     });
+    const doneCount = CITIES.reduce((n, c) => n + c.attractions.filter(a => a.done).length, 0);
+    routeLog = Array.isArray(s.routeLog) ? s.routeLog
+      : CITIES.filter(c => c.attractions.some(a => a.done)).map(c => c.name);
+    answeredTotal = s.answeredTotal ?? doneCount;
+    correctTotal = s.correctTotal !== undefined ? s.correctTotal : (doneCount ? null : 0);
     return true;
   } catch(e) { return false; }
 }
@@ -1461,16 +1539,250 @@ document.getElementById('victoryReplay').onclick = () => {
   resetGame();
 };
 
-// Share score
-function shareScore() {
-  const txt = `שיחקתי קרוון בישראל וקיבלתי ${score} נקודות! 🚐🇮🇱`;
-  if (navigator.share) {
-    navigator.share({ title: 'קרוון בישראל 🚐', text: txt }).catch(() => {});
-  } else if (navigator.clipboard) {
-    navigator.clipboard.writeText(txt).then(() => alert('הניקוד הועתק ✓')).catch(() => {});
-  }
+// ═══════════════════════════════════════════════════════════════
+// SHARE CARD — 1080×1920 image for Instagram stories
+// ═══════════════════════════════════════════════════════════════
+const GAME_URL = 'pelegnisim.github.io/dreamymap';
+const IG_HANDLE = '@pelegnisim';
+let shareBlob = null, shareUrl = null;
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
 }
-document.getElementById('victoryShare').onclick = shareScore;
+
+function buildShareCard() {
+  const CW = 1080, CH = 1920;
+  const cv = document.createElement('canvas');
+  cv.width = CW; cv.height = CH;
+  const c = cv.getContext('2d');
+  const FONT = "'Segoe UI', Tahoma, Arial, sans-serif";
+  c.direction = 'rtl';
+
+  // Background + a few stars
+  const bg = c.createLinearGradient(0, 0, 0, CH);
+  bg.addColorStop(0, '#0d1f45'); bg.addColorStop(0.55, '#0a1530'); bg.addColorStop(1, '#050b18');
+  c.fillStyle = bg; c.fillRect(0, 0, CW, CH);
+  let seed = 7;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  for (let i = 0; i < 90; i++) {
+    c.fillStyle = `rgba(255,255,255,${0.15 + rnd() * 0.45})`;
+    c.beginPath(); c.arc(rnd() * CW, rnd() * CH, 1 + rnd() * 2.2, 0, Math.PI * 2); c.fill();
+  }
+
+  // Header
+  c.textAlign = 'center';
+  c.fillStyle = '#ffd700';
+  c.font = `bold 92px ${FONT}`;
+  c.fillText('קרוון בישראל', CW / 2, 160);
+  c.fillStyle = '#9fc3ff';
+  c.font = `44px ${FONT}`;
+  c.fillText('המסלול שלי עם דרימי 🚐', CW / 2, 235);
+
+  // Map (right side)
+  const k = 2.1, ox = 680 - 99 * k, oy = 305;
+  const P = (x, y) => [ox + x * k, oy + y * k];
+  c.save();
+  c.shadowColor = 'rgba(48,160,255,.45)'; c.shadowBlur = 40;
+  const g = c.createLinearGradient(0, oy, 0, oy + 530 * k);
+  g.addColorStop(0, '#4a7c42'); g.addColorStop(0.45, '#7a8c3a');
+  g.addColorStop(0.72, '#b89040'); g.addColorStop(1, '#c49a30');
+  c.beginPath();
+  ISRAEL.forEach(([x, y], i) => { const [px, py] = P(x, y); i ? c.lineTo(px, py) : c.moveTo(px, py); });
+  c.closePath();
+  c.fillStyle = g; c.fill();
+  c.restore();
+  c.strokeStyle = '#2d5a28'; c.lineWidth = 5; c.stroke();
+
+  const byName = Object.fromEntries(CITIES.map(ci => [ci.name, ci]));
+  const route = routeLog.map(n => byName[n]).filter(Boolean);
+
+  // Unvisited cities — faint dots
+  CITIES.forEach(ci => {
+    if (routeLog.includes(ci.name)) return;
+    const [x, y] = P(ci.mx, ci.my);
+    c.fillStyle = 'rgba(255,255,255,.35)';
+    c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2); c.fill();
+  });
+
+  // Route line
+  if (route.length > 1) {
+    c.save();
+    c.setLineDash([22, 14]); c.lineCap = 'round';
+    c.strokeStyle = '#ff7a2e'; c.lineWidth = 7;
+    c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 8;
+    c.beginPath();
+    route.forEach((ci, i) => { const [x, y] = P(ci.mx, ci.my); i ? c.lineTo(x, y) : c.moveTo(x, y); });
+    c.stroke();
+    c.restore();
+  }
+
+  // Visited cities — names first (nudged so nothing overlaps), then gold numbered dots on top
+  const placed = route.map(ci => { const [x, y] = P(ci.mx, ci.my); return { x: x - 17, y: y - 17, w: 34, h: 34 }; });
+  const hits = r => placed.some(q => r.x < q.x + q.w && r.x + r.w > q.x && r.y < q.y + q.h && r.y + r.h > q.y);
+  c.font = `bold 27px ${FONT}`;
+  route.forEach(ci => {
+    const [x, y] = P(ci.mx, ci.my);
+    const w = c.measureText(ci.name).width, h = 30;
+    const options = [];
+    for (const dy of [0, 28, -28, 54, -54, 80]) {
+      options.push({ x: x - 22 - w, y: y - 20 + dy, w, h, align: 'right', tx: x - 22, ty: y + 9 + dy });
+      options.push({ x: x + 22, y: y - 20 + dy, w, h, align: 'left', tx: x + 22, ty: y + 9 + dy });
+    }
+    const inside = o => o.x > 12 && o.x + o.w < CW - 12;
+    const spot = options.find(o => inside(o) && !hits(o)) || options[0];
+    placed.push(spot);
+    if (spot.ty !== y + 9) {   // label moved away from its dot — draw a thin leader line
+      const lx = spot.align === 'right' ? spot.tx + 4 : spot.tx - 4;
+      c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 2;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(lx, spot.ty - 9); c.stroke();
+    }
+    c.textAlign = spot.align;
+    c.lineWidth = 7; c.strokeStyle = 'rgba(5,11,24,.85)';
+    c.strokeText(ci.name, spot.tx, spot.ty);
+    c.fillStyle = '#fff';
+    c.fillText(ci.name, spot.tx, spot.ty);
+  });
+  route.forEach((ci, i) => {
+    const [x, y] = P(ci.mx, ci.my);
+    c.fillStyle = '#ffd700'; c.strokeStyle = '#fff'; c.lineWidth = 4;
+    c.beginPath(); c.arc(x, y, 15, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.fillStyle = '#1a2a50'; c.font = `bold 17px ${FONT}`; c.textAlign = 'center';
+    c.fillText(String(i + 1), x, y + 6);
+  });
+
+  // Dreamy at the last stop
+  const last = route[route.length - 1];
+  if (last) {
+    const [x, y] = P(last.mx, last.my);
+    if (caravanImg.complete && caravanImg.naturalWidth > 0) c.drawImage(caravanImg, x - 10, y - 120, 110, 110);
+    else { c.font = `86px ${FONT}`; c.textAlign = 'center'; c.fillText('🚐', x + 45, y - 30); }
+  }
+
+  // Stats column (left side)
+  const sx = 215;
+  c.textAlign = 'center';
+  c.fillStyle = '#30a0ff';
+  c.font = `bold 150px ${FONT}`;
+  c.fillText(String(score), sx, 700);
+  c.fillStyle = '#9fc3ff';
+  c.font = `42px ${FONT}`;
+  c.fillText('נקודות', sx, 760);
+
+  const totalAttr = CITIES.reduce((n, ci) => n + ci.attractions.length, 0);
+  const doneAttr = CITIES.reduce((n, ci) => n + ci.attractions.filter(a => a.done).length, 0);
+  const stats = [
+    ['🏙️', `${routeLog.length} ערים`],
+    ['📍', `${doneAttr}/${totalAttr} אטרקציות`],
+  ];
+  if (correctTotal !== null && answeredTotal > 0)
+    stats.push(['✅', `${Math.round(100 * correctTotal / answeredTotal)}% נכונות`]);
+  stats.forEach(([icon, label], i) => {
+    const y = 840 + i * 120;
+    c.fillStyle = 'rgba(48,160,255,.14)';
+    roundRect(c, sx - 175, y, 350, 96, 26); c.fill();
+    c.strokeStyle = 'rgba(48,160,255,.4)'; c.lineWidth = 2; c.stroke();
+    c.fillStyle = '#fff'; c.font = `bold 36px ${FONT}`;
+    c.fillText(`${icon} ${label}`, sx, y + 61);
+  });
+
+  // Footer
+  c.textAlign = 'center';
+  c.fillStyle = '#fff';
+  c.font = `bold 48px ${FONT}`;
+  c.fillText('גם אתם רוצים לטייל עם דרימי?', CW / 2, 1560);
+  c.fillStyle = '#ffd700';
+  c.font = `40px ${FONT}`;
+  c.direction = 'ltr';
+  c.fillText(GAME_URL, CW / 2, 1630);
+  const pillW = 400, pillY = 1700;
+  const pg = c.createLinearGradient(CW / 2 - pillW / 2, 0, CW / 2 + pillW / 2, 0);
+  pg.addColorStop(0, '#ff6a3d'); pg.addColorStop(1, '#ffb02e');
+  c.fillStyle = pg;
+  roundRect(c, CW / 2 - pillW / 2, pillY, pillW, 92, 46); c.fill();
+  c.fillStyle = '#fff'; c.font = `bold 44px ${FONT}`;
+  c.fillText(IG_HANDLE, CW / 2, pillY + 62);
+  c.direction = 'rtl';
+
+  return cv;
+}
+
+function openShareCard() {
+  closeModal();
+  const cv = buildShareCard();
+  cv.toBlob(blob => {
+    if (!blob) return;
+    shareBlob = blob;
+    if (shareUrl) URL.revokeObjectURL(shareUrl);
+    shareUrl = URL.createObjectURL(blob);
+    document.getElementById('shareImg').src = shareUrl;
+    document.getElementById('shareOverlay').style.display = 'flex';
+  }, 'image/png');
+}
+
+function shareText() {
+  return `שיחקתי ב"קרוון בישראל" של ${IG_HANDLE} וצברתי ${score} נקודות 🚐🇮🇱 ${GAME_URL}`;
+}
+
+function downloadShareCard() {
+  if (!shareUrl) return;
+  const a = document.createElement('a');
+  a.href = shareUrl; a.download = 'dreamy-trip.png';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+document.getElementById('shareGo').onclick = async () => {
+  if (!shareBlob) return;
+  const file = new File([shareBlob], 'dreamy-trip.png', { type: 'image/png' });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'קרוון בישראל 🚐', text: shareText() });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;   // user closed the share sheet
+  }
+  // Desktop / unsupported: save the image instead
+  downloadShareCard();
+};
+document.getElementById('shareSave').onclick = downloadShareCard;
+document.getElementById('shareClose').onclick = () => {
+  document.getElementById('shareOverlay').style.display = 'none';
+};
+document.getElementById('victoryShare').onclick = openShareCard;
+document.getElementById('shareBtn').onclick = openShareCard;
+
+// Floating "share" button over the side panel (canvas-drawn), positioned in % of the canvas
+let shareBtnState = '';
+function updateShareBtn() {
+  const btn = document.getElementById('shareBtn');
+  const show = !selectingStart && routeLog.length > 0 && !modalOpen &&
+               document.getElementById('victory').style.display !== 'flex';
+  let state = 'hidden';
+  if (show) state = portraitMode ? 'portrait' : 'landscape';
+  if (state === shareBtnState) return;
+  shareBtnState = state;
+  if (state === 'hidden') { btn.style.display = 'none'; return; }
+  const cw = canvas.width, ch = canvas.height;
+  if (state === 'landscape') {
+    btn.style.left = ((PANEL_X + 18) / cw * 100) + '%';
+    btn.style.top = (372 / ch * 100) + '%';
+    btn.style.width = ((PANEL_W - 36) / cw * 100) + '%';
+    btn.textContent = '📸 שתפו את המסלול';
+  } else {
+    btn.style.left = (10 / cw * 100) + '%';
+    btn.style.top = ((H + 116) / ch * 100) + '%';
+    btn.style.width = ((MAP_W / 3 - 20) / cw * 100) + '%';
+    btn.textContent = '📸 שיתוף';
+  }
+  btn.style.display = 'block';
+}
+
 
 
 function spawnConfetti() {
@@ -2060,6 +2372,7 @@ function loop(now) {
   frameScale = lastFrameT ? Math.min(3, (now - lastFrameT) / (1000 / 60)) : 1;
   lastFrameT = now;
   if (!selectingStart) update();
+  updateShareBtn();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // MAP area — apply zoom/pan transform, clipped to map region
