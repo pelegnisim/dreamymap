@@ -1199,10 +1199,11 @@ async function loadCityPhoto(city) {
       if (!d.thumbnail || !d.thumbnail.source) continue;
       let src = d.thumbnail.source;
       const o = d.originalimage;
-      if (o && o.width > 640) src = src.replace(/\/\d+px-/, '/640px-');
+      // Wikimedia only serves standard thumbnail widths (330, 500, 960…), so ask for 500
+      if (o && o.width > 500) src = src.replace(/\/\d+px-/, '/500px-');
       else if (o && o.source) src = o.source;
       const page = (d.content_urls && d.content_urls.desktop && d.content_urls.desktop.page) || '';
-      return { src, page };
+      return { src, page, fallback: d.thumbnail.source };
     } catch (e) { /* offline or blocked — try next title */ }
   }
   return null;
@@ -1219,7 +1220,10 @@ function renderCityExtras(city) {
     if (activeCity !== city) return;
     if (!p) { box.style.display = 'none'; return; }
     img.onload = () => box.classList.add('loaded');
-    img.onerror = () => { box.style.display = 'none'; };
+    img.onerror = () => {
+      if (p.fallback && img.src !== p.fallback) img.src = p.fallback;
+      else box.style.display = 'none';
+    };
     img.src = p.src;
     credit.href = p.page || 'https://en.wikipedia.org';
   });
